@@ -1,0 +1,31 @@
+# Secretos — nunca deben quedar dentro de la imagen
+.env
+external/orion-ai/.env
+
+# Git
+.git
+.gitignore
+
+# Node
+node_modules/
+
+# Cache Python
+external/orion-ai/__pycache__/
+external/orion-ai/**/__pycache__/
+external/orion-ai/.venv/
+external/orion-ai/**/*.pyc
+
+# Logs y memoria generada en runtime
+external/orion-ai/logs/
+external/orion-ai/memory/
+
+# Storage generado en runtime
+storage/framework/cache/
+storage/framework/sessions/
+storage/framework/views/
+storage/logs/
+bootstrap/cache/
+
+# Tests y dev
+tests/
+*.test.*

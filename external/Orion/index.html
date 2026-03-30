@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orion — Facial Renderer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      color: #ccc;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    body.embed #controls { display: none; }
+    body.embed {
+      display: block;
+      background: transparent;
+    }
+    body.embed #canvas-area {
+      width: 100vw;
+      height: 100vh;
+      padding: 6px;
+    }
+    body.embed #orion {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    body.embed #emotion-label {
+      bottom: 8px;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      opacity: 0.45;
+    }
+
+    #canvas-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    #emotion-label {
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 16px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      font-weight: 300;
+    }
+
+    #controls {
+      width: 320px;
+      background: #0a0a0f;
+      border-left: 1px solid #1a1a2a;
+      padding: 24px 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    #controls h2 {
+      font-size: 14px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #5a8abf;
+      font-weight: 400;
+      margin-bottom: 4px;
+    }
+
+    .control-group { display: flex; flex-direction: column; gap: 12px; }
+
+    .slider-row { display: flex; flex-direction: column; gap: 4px; }
+
+    .slider-row label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #778;
+    }
+
+    .slider-row label span {
+      color: #aab;
+      font-family: 'Courier New', monospace;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 4px;
+      background: #1a1a2e; border-radius: 2px;
+      outline: none; cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #4a8abf; border: 2px solid #0a0a0f; cursor: pointer;
+    }
+
+    .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .presets button {
+      background: #111120; border: 1px solid #222238;
+      color: #8899aa; padding: 8px 10px; border-radius: 6px;
+      cursor: pointer; font-size: 11px; letter-spacing: 1px;
+      text-transform: uppercase; transition: all 0.2s;
+    }
+
+    .presets button:hover { background: #1a1a30; border-color: #4a8abf; color: #bcc; }
+    .presets button.active { background: #1a2a40; border-color: #4a8abf; color: #8ac; }
+
+    .toggle-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #778;
+    }
+
+    .toggle {
+      width: 40px; height: 20px; background: #1a1a2e;
+      border-radius: 10px; position: relative; cursor: pointer; transition: background 0.3s;
+    }
+    .toggle.on { background: #2a4a6e; }
+    .toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #556; transition: all 0.3s;
+    }
+    .toggle.on::after { left: 22px; background: #6ab; }
+
+    hr { border: none; border-top: 1px solid #1a1a2a; }
+
+    .derived-info {
+      font-family: 'Courier New', monospace;
+      font-size: 11px; color: #556; line-height: 1.8;
+    }
+    .derived-info .val { color: #8ab; }
+  </style>
+</head>
+<body>
+
+  <div id="canvas-area">
+    <!-- SVG Orion base — eyes are manipulated via JS -->
+    <svg id="orion" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="600" height="600">
+      <defs>
+        <filter id="outerGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur"/>
+          <feColorMatrix id="outerGlowColor" in="blur" type="matrix"
+            values="0 0 0 0 0.2  0 0 0 0 0.4  0 0 0 0 0.8  0 0 0 0.7 0" result="glowColor"/>
+          <feMerge><feMergeNode in="glowColor"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+
+        <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="20" result="blur"/>
+          <feColorMatrix id="softGlowColor" in="blur" type="matrix"
+            values="0 0 0 0 0.15  0 0 0 0 0.3  0 0 0 0 0.7  0 0 0 0.5 0" result="glowColor"/>
+          <feMerge><feMergeNode in="glowColor"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+
+        <filter id="purpleGlow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="35" result="blur"/>
+          <feColorMatrix id="purpleGlowColor" in="blur" type="matrix"
+            values="0 0 0 0 0.25  0 0 0 0 0.1  0 0 0 0 0.45  0 0 0 0.4 0"/>
+        </filter>
+
+        <filter id="eyeGlow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+          <feColorMatrix id="eyeGlowColor" in="blur" type="matrix"
+            values="0 0 0 0 0.5  0 0 0 0 0.6  0 0 0 0 0.8  0 0 0 0.9 0" result="glowColor"/>
+          <feMerge><feMergeNode in="glowColor"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+
+        <!-- Clip paths for eyelids — these get animated -->
+        <clipPath id="clipLeftEye">
+          <path id="clipLeftPath" d="M 136 202 Q 186 192, 236 202 L 236 302 Q 186 312, 136 302 Z"/>
+        </clipPath>
+        <clipPath id="clipRightEye">
+          <path id="clipRightPath" d="M 276 202 Q 326 192, 376 202 L 376 302 Q 326 312, 276 302 Z"/>
+        </clipPath>
+
+        <radialGradient id="faceGrad" cx="50%" cy="45%" r="50%">
+          <stop offset="0%" stop-color="#0a1a3a"/>
+          <stop offset="70%" stop-color="#050e22"/>
+          <stop offset="100%" stop-color="#020812"/>
+        </radialGradient>
+
+        <radialGradient id="eyeGradL" cx="50%" cy="45%" r="50%">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="70%" stop-color="#e8f4ff"/>
+          <stop offset="100%" stop-color="#c0dfff"/>
+        </radialGradient>
+        <radialGradient id="eyeGradR" cx="50%" cy="45%" r="50%">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="70%" stop-color="#e8f4ff"/>
+          <stop offset="100%" stop-color="#c0dfff"/>
+        </radialGradient>
+
+        <radialGradient id="eyeRingGradL" cx="50%" cy="50%" r="50%">
+          <stop offset="60%" stop-color="#1a3a5c"/>
+          <stop offset="85%" stop-color="#2a5a8c"/>
+          <stop offset="100%" stop-color="#4a8abf"/>
+        </radialGradient>
+        <radialGradient id="eyeRingGradR" cx="50%" cy="50%" r="50%">
+          <stop offset="60%" stop-color="#1a3a5c"/>
+          <stop offset="85%" stop-color="#2a5a8c"/>
+          <stop offset="100%" stop-color="#4a8abf"/>
+        </radialGradient>
+      </defs>
+
+      <!-- Background -->
+      <rect width="512" height="512" fill="#000000"/>
+
+      <!-- Ambient glow -->
+      <circle id="ambientGlow" cx="256" cy="256" r="185" fill="none" stroke="#5a3090" stroke-width="60" filter="url(#purpleGlow)" opacity="0.35"/>
+
+      <!-- Soft bloom ring -->
+      <circle id="softBloom" cx="256" cy="256" r="175" fill="none" stroke="#4a90c8" stroke-width="30" filter="url(#softGlow)" opacity="0.25"/>
+
+      <!-- Main outer ring -->
+      <circle id="mainRing" cx="256" cy="256" r="175" fill="none" stroke="#5ea8d0" stroke-width="14" filter="url(#outerGlow)"/>
+
+      <!-- Inner subtle ring -->
+      <circle cx="256" cy="256" r="163" fill="none" stroke="#3a7ab0" stroke-width="2" opacity="0.4"/>
+
+      <!-- Face -->
+      <circle cx="256" cy="256" r="158" fill="url(#faceGrad)"/>
+
+      <!-- ═══ LEFT EYE GROUP ═══ -->
+      <g id="leftEyeGroup" clip-path="url(#clipLeftEye)">
+        <!-- Socket ring -->
+        <circle id="leftSocket" cx="186" cy="252" r="50" fill="url(#eyeRingGradL)" filter="url(#eyeGlow)"/>
+        <!-- Eye white -->
+        <circle id="leftEye" cx="186" cy="252" r="38" fill="url(#eyeGradL)"/>
+      </g>
+
+      <!-- ═══ RIGHT EYE GROUP ═══ -->
+      <g id="rightEyeGroup" clip-path="url(#clipRightEye)">
+        <!-- Socket ring -->
+        <circle id="rightSocket" cx="326" cy="252" r="50" fill="url(#eyeRingGradR)" filter="url(#eyeGlow)"/>
+        <!-- Eye white -->
+        <circle id="rightEye" cx="326" cy="252" r="38" fill="url(#eyeGradR)"/>
+      </g>
+    </svg>
+
+    <div id="emotion-label">calma</div>
+  </div>
+
+  <div id="controls">
+    <h2>VED Parameters</h2>
+    <div class="control-group">
+      <div class="slider-row">
+        <label>Valence <span id="v-val">0.50</span></label>
+        <input type="range" id="valence" min="-100" max="100" value="50">
+      </div>
+      <div class="slider-row">
+        <label>Energy <span id="e-val">0.10</span></label>
+        <input type="range" id="energy" min="0" max="100" value="10">
+      </div>
+      <div class="slider-row">
+        <label>Dominance <span id="d-val">0.60</span></label>
+        <input type="range" id="dominance" min="0" max="100" value="60">
+      </div>
+    </div>
+
+    <hr>
+
+    <h2>Presets</h2>
+    <div class="presets">
+      <button onclick="setPreset(0, 0.3, 0.5, 'neutral', event)">Neutral</button>
+      <button onclick="setPreset(0.85, 0.5, 0.4, 'feliz', event)">Feliz</button>
+      <button onclick="setPreset(-0.8, 0.9, 0.9, 'enojado', event)">Enojado</button>
+      <button onclick="setPreset(-0.72, 0.12, 0.18, 'triste', event)">Triste</button>
+      <button onclick="setPreset(0.3, 0.95, 0.2, 'sorpresa', event)">Sorpresa</button>
+      <button onclick="setPreset(-0.38, 0.82, 0.2, 'miedo', event)">Miedo</button>
+      <button onclick="setPreset(0.5, 0.1, 0.6, 'calma', event)">Calma</button>
+      <button onclick="setPreset(0, 0.95, 1.0, 'pensando', event)">Pensando</button>
+      <button onclick="setPreset(0.6, 0.15, 0.5, 'dormido', event)">Dormido</button>
+      <button onclick="setPreset(-0.2, 0.5, 0.3, 'confuso', event)">Confuso</button>
+    </div>
+
+    <hr>
+
+    <h2>Animaciones</h2>
+    <div class="control-group">
+      <div class="toggle-row">Parpadeo <div class="toggle on" id="toggle-blink" onclick="toggleOpt('blink', this)"></div></div>
+      <div class="toggle-row">Respiración <div class="toggle on" id="toggle-breath" onclick="toggleOpt('breath', this)"></div></div>
+      <div class="toggle-row">Micro-saccades <div class="toggle on" id="toggle-saccade" onclick="toggleOpt('saccade', this)"></div></div>
+      <div class="toggle-row">Thinking pulse <div class="toggle" id="toggle-thinking" onclick="toggleOpt('thinking', this)"></div></div>
+    </div>
+
+    <hr>
+
+    <h2>Derived Values</h2>
+    <div class="derived-info" id="derived"></div>
+
+    <hr>
+
+    <h2>Auto-cycle</h2>
+    <div class="control-group">
+      <div class="toggle-row">Cycle emotions <div class="toggle" id="toggle-cycle" onclick="toggleOpt('cycle', this)"></div></div>
+      <div class="slider-row">
+        <label>Speed <span id="cycle-speed-val">5s</span></label>
+        <input type="range" id="cycle-speed" min="2" max="15" value="5">
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════
+    //  ORION — SVG-based Infinite Facial Renderer (VED)
+    // ═══════════════════════════════════════════════════
+
+    // ─── SVG element refs ───
+    const $clipL     = document.getElementById('clipLeftPath');
+    const $clipR     = document.getElementById('clipRightPath');
+    const $mainRing  = document.getElementById('mainRing');
+    const $ambient   = document.getElementById('ambientGlow');
+    const $softBloom = document.getElementById('softBloom');
+
+    // Eye centers from SVG
+    const LEX = 186, LEY = 252;  // left eye
+    const REX = 326, REY = 252;  // right eye
+    const SOCKET_R = 50;
+    const EYE_R    = 38;
+
+    // ─── State ───
+    const ved = { v: 0.5, e: 0.1, d: 0.6 };
+    const smoothVed = { v: 0.5, e: 0.1, d: 0.6 };
+
+    const opts = { blink: true, breath: true, saccade: true, thinking: false, cycle: false };
+    let externalIntensity = 1;
+
+    // Blink
+    let blinkTimer = 0, blinkNextAt = rnd(2500, 5500);
+    let blinkPhase = 0, blinkDuration = 160;
+
+    // Saccade
+    let saccTimer = 0, saccNextAt = rnd(400, 900);
+    let sacc = { x: 0, y: 0 }, saccTarget = { x: 0, y: 0 };
+
+    // Cycle
+    let cycleTime = 0, cycleIdx = 0;
+    const cyclePresets = [
+      { v: 0,    e: 0.3,  d: 0.5,  name: 'neutral'  },
+      { v: 0.85, e: 0.5,  d: 0.4,  name: 'feliz'    },
+      { v: 0.3,  e: 0.95, d: 0.2,  name: 'sorpresa' },
+      { v:-0.8,  e: 0.9,  d: 0.9,  name: 'enojado'  },
+      { v:-0.72, e: 0.12, d: 0.18, name: 'triste'   },
+      { v:-0.38, e: 0.82, d: 0.2,  name: 'miedo'    },
+      { v: 0.5,  e: 0.1,  d: 0.6,  name: 'calma'    },
+      { v: 0,    e: 0.95, d: 1.0,  name: 'pensando' },
+      { v: 0.6,  e: 0.15, d: 0.5,  name: 'dormido'  },
+    ];
+    let cycleFrom = { ...cyclePresets[0] }, cycleTo = { ...cyclePresets[1] };
+
+    // Time
+    let lastT = performance.now(), totalT = 0;
+
+    // ═══════════════════════════════════════════
+    //  DERIVED PARAMETERS FROM VED
+    // ═══════════════════════════════════════════
+
+    function getDerived(v, e, d) {
+      // ── Aperture (vertical openness): low energy → wide open, high → tense/narrow
+      const aperture = clamp(0.1 + 0.85 * (1 - e), 0, 1);
+
+      // ── Tilt: angry eyes (negative valence + high dominance → eyelid angles down toward center)
+      //    Range roughly -1 to 1.  Negative = "kind/sad", Positive = "angry/intense"
+      const tilt = clamp((-v * 0.7) + (d - 0.5) * 0.6, -1, 1);
+
+      // ── Squash: at very low aperture, eyes become horizontal lines
+      //    0 = perfect circle, 1 = totally flat line
+      const squash = clamp(1 - aperture, 0, 1);
+
+      // ── Pupil size (not used in clip path, but good for glow intensity)
+      const pupil = 0.25 + 0.35 * e;
+
+      // ── Color: Hue from valence continuously
+      const hue = mapRange(v, -1, 1, 0, 200);
+      const sat = 50 + 45 * e;
+      const light = 42 + 18 * d;
+
+      return { aperture, tilt, squash, pupil, hue, sat, light };
+    }
+
+    // ═══════════════════════════════════════════
+    //  EYE CLIP PATH GENERATION
+    //  This is the core: deforming the "eyelid" shape
+    //  that clips the circular SVG eyes.
+    //
+    //  The eye white & socket stay as circles in the SVG.
+    //  We just change the clip-path to reveal more/less
+    //  of them, and tilt the opening for expression.
+    // ═══════════════════════════════════════════
+
+    function buildEyeClipPath(cx, cy, r, aperture, tilt, side, blinkAmt) {
+      // side: -1 = left eye, +1 = right eye
+      // aperture: 0 → closed line, 1 → full circle visible
+      // tilt: >0 → angry (outer big, inner small/pinched toward nose)
+      //       <0 → sad/soft (inner big, outer droops)
+      // blinkAmt: 0 = open, 1 = fully shut
+
+      const effectiveAperture = Math.max(0.02, aperture * (1 - blinkAmt));
+      const pad = r + 16; // padding to include socket ring
+
+      // Base vertical opening from center
+      const openY = pad * effectiveAperture;
+
+      // Tilt creates wedge shape:
+      // For angry (tilt > 0): OUTER corner stays open, INNER corner pinches shut
+      // This means:
+      //   Left eye:  left=outer=big opening,  right=inner=small opening
+      //   Right eye: right=outer=big opening,  left=inner=small opening
+      const tiltStrength = Math.abs(tilt) * 0.7;
+
+      // How much the inner side closes and outer side opens
+      const outerBonus = tiltStrength * pad * 0.3;  // outer opens more
+      const innerPinch = tiltStrength * pad * 0.65;  // inner pinches more
+
+      // Determine which side is outer vs inner for each eye
+      // Left eye (side=-1): left edge is outer, right edge is inner
+      // Right eye (side=+1): right edge is outer, left edge is inner
+      let leftEdgeOpenY, rightEdgeOpenY;
+
+      if (tilt > 0) {
+        // Angry: outer big, inner small
+        if (side === -1) {
+          // Left eye: left=outer(big), right=inner(small)
+          leftEdgeOpenY  = openY + outerBonus;
+          rightEdgeOpenY = Math.max(1, openY - innerPinch);
+        } else {
+          // Right eye: right=outer(big), left=inner(small)
+          leftEdgeOpenY  = Math.max(1, openY - innerPinch);
+          rightEdgeOpenY = openY + outerBonus;
+        }
+      } else {
+        // Sad/soft: inner slightly bigger, outer droops
+        const sadStrength = Math.abs(tilt) * 0.4;
+        if (side === -1) {
+          leftEdgeOpenY  = Math.max(1, openY - sadStrength * pad * 0.3);
+          rightEdgeOpenY = openY + sadStrength * pad * 0.15;
+        } else {
+          leftEdgeOpenY  = openY + sadStrength * pad * 0.15;
+          rightEdgeOpenY = Math.max(1, openY - sadStrength * pad * 0.3);
+        }
+      }
+
+      // Key x-coordinates
+      const left  = cx - pad;
+      const right = cx + pad;
+
+      // Top lid: curves from left edge down to right edge
+      // The top lid drops MORE on the inner side (higher Y = lower on screen)
+      const topLeftY  = cy - leftEdgeOpenY;
+      const topRightY = cy - rightEdgeOpenY;
+
+      // Control point for top curve — biased toward the more open side
+      const topMidY = Math.min(topLeftY, topRightY) - openY * 0.08;
+
+      // Bottom lid: slight tilt but much less dramatic (mostly follows center)
+      const botTiltAmount = 0.15; // bottom lid barely tilts
+      const botLeftY  = cy + openY + (leftEdgeOpenY - openY) * botTiltAmount;
+      const botRightY = cy + openY + (rightEdgeOpenY - openY) * botTiltAmount;
+      const botMidY   = Math.max(botLeftY, botRightY) + openY * 0.08;
+
+      // SVG path: almond/wedge shape
+      // Top arc: left → right
+      // Bottom arc: right → left
+      return `M ${left} ${topLeftY} Q ${cx} ${topMidY}, ${right} ${topRightY} L ${right} ${botRightY} Q ${cx} ${botMidY}, ${left} ${botLeftY} Z`;
+    }
+
+    // ═══════════════════════════════════════════
+    //  COLOR APPLICATION
+    // ═══════════════════════════════════════════
+
+    function hslToRgb01(h, s, l) {
+      s /= 100; l /= 100;
+      const k = n => (n + h / 30) % 12;
+      const a = s * Math.min(l, 1 - l);
+      const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+      return [f(0), f(8), f(4)];
+    }
+
+    function applyGlowColor(der, breathMod, thinkMod, tune) {
+      const hue = ((der.hue + tune.hueShift) % 360 + 360) % 360;
+      const sat = clamp(der.sat + tune.satBoost, 20, 100);
+      const light = clamp(der.light + tune.lightBoost, 20, 85);
+      const [r, g, b] = hslToRgb01(hue, sat, light);
+      const mod = breathMod * thinkMod * tune.glowPulse;
+
+      // Main ring stroke color
+      const hsl = `hsl(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%)`;
+      $mainRing.setAttribute('stroke', hsl);
+
+      // Ambient glow color
+      const ambHsl = `hsl(${(hue + 30).toFixed(0)}, ${(sat * 0.5).toFixed(0)}%, ${(light * 0.5).toFixed(0)}%)`;
+      $ambient.setAttribute('stroke', ambHsl);
+      $ambient.setAttribute('opacity', (0.3 * mod).toFixed(3));
+
+      // Soft bloom
+      $softBloom.setAttribute('stroke', hsl);
+      $softBloom.setAttribute('opacity', (0.2 * mod).toFixed(3));
+
+      // Ring width breathing
+      $mainRing.setAttribute('stroke-width', (12 + 3 * (mod - 0.85)).toFixed(2));
+
+      // Update filter color matrices to match hue
+      const glowMatrix = `0 0 0 0 ${(r * 0.5).toFixed(3)}  0 0 0 0 ${(g * 0.5).toFixed(3)}  0 0 0 0 ${(b * 0.8).toFixed(3)}  0 0 0 ${(0.7 * mod).toFixed(2)} 0`;
+      document.getElementById('outerGlowColor').setAttribute('values', glowMatrix);
+
+      const eyeGlowMatrix = `0 0 0 0 ${(r * 0.6).toFixed(3)}  0 0 0 0 ${(g * 0.6).toFixed(3)}  0 0 0 0 ${(b * 0.9).toFixed(3)}  0 0 0 ${(0.8 * mod).toFixed(2)} 0`;
+      document.getElementById('eyeGlowColor').setAttribute('values', eyeGlowMatrix);
+    }
+
+    function detectEmotion(v, e, d) {
+      if (v > 0.5 && e > 0.4) return 'feliz';
+      if (v > 0.3 && e < 0.25) return 'calma';
+      if (v < -0.5 && e > 0.6 && d > 0.5) return 'enojado';
+      if (v < -0.3 && e < 0.25) return 'triste';
+      if (e > 0.8 && Math.abs(v) < 0.3 && d < 0.35) return 'sorpresa';
+      if (v < -0.2 && e > 0.5 && d < 0.3) return 'miedo';
+      if (e < 0.2 && v > 0.3) return 'dormido';
+      if (Math.abs(v) < 0.2 && e > 0.85 && d > 0.8) return 'pensando';
+      if (Math.abs(v) < 0.25 && e > 0.35 && d < 0.4) return 'confuso';
+      return 'neutral';
+    }
+
+    const emotionStyle = {
+      miedo: 0.72,
+      triste: 0.66,
+    };
+
+    function getEmotionTuning(label, tMs) {
+      const t = tMs * 0.001;
+      switch (label) {
+        case 'miedo': {
+          const k = emotionStyle.miedo;
+          const tremble = 1 + 0.18 * Math.sin(t * lerp(18, 26, k)) + 0.08 * Math.sin(t * lerp(28, 41, k));
+          return {
+            apertureBias: lerp(0.12, 0.34, k),
+            tiltBias: lerp(-0.05, 0.14, k),
+            leftApertureBias: lerp(0.01, 0.06, k),
+            rightApertureBias: lerp(-0.01, -0.06, k),
+            saccAmp: lerp(1.2, 1.75, k),
+            saccRateMul: lerp(1.15, 1.8, k),
+            blinkRateMul: lerp(1.05, 1.45, k),
+            jitterX: lerp(0.35, 1.35, k) * Math.sin(t * lerp(13, 31, k)) * tremble,
+            jitterY: lerp(0.2, 0.95, k) * Math.sin(t * lerp(11, 27, k) + 0.9) * tremble,
+            hueShift: lerp(-6, -20, k),
+            satBoost: lerp(5, 15, k),
+            lightBoost: lerp(-1, -4, k),
+            glowPulse: 0.96 + lerp(0.06, 0.2, k) * Math.sin(t * lerp(8, 16, k))
+          };
+        }
+        case 'sorpresa':
+          return {
+            apertureBias: 0.45,
+            tiltBias: -0.08,
+            leftApertureBias: 0,
+            rightApertureBias: 0,
+            saccAmp: 1.15,
+            saccRateMul: 1.2,
+            blinkRateMul: 0.65,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: 8,
+            satBoost: 10,
+            lightBoost: 2,
+            glowPulse: 1.05
+          };
+        case 'triste':
+          const kSad = emotionStyle.triste;
+          return {
+            apertureBias: lerp(-0.22, -0.5, kSad),
+            tiltBias: lerp(-0.22, -0.42, kSad),
+            leftApertureBias: lerp(-0.02, -0.1, kSad),
+            rightApertureBias: lerp(-0.02, -0.1, kSad),
+            saccAmp: lerp(0.45, 0.22, kSad),
+            saccRateMul: lerp(0.72, 0.38, kSad),
+            blinkRateMul: lerp(0.9, 0.62, kSad),
+            jitterX: 0,
+            jitterY: 0.12 * Math.sin(t * 2.4),
+            hueShift: lerp(-14, -30, kSad),
+            satBoost: lerp(-4, -12, kSad),
+            lightBoost: lerp(-2, -8, kSad),
+            glowPulse: lerp(0.94, 0.82, kSad) + 0.02 * Math.sin(t * 2)
+          };
+        case 'enojado':
+          return {
+            apertureBias: -0.32,
+            tiltBias: 0.5,
+            leftApertureBias: -0.02,
+            rightApertureBias: -0.02,
+            saccAmp: 0.9,
+            saccRateMul: 1.2,
+            blinkRateMul: 1.1,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: -30,
+            satBoost: 18,
+            lightBoost: 1,
+            glowPulse: 1.08 + 0.08 * Math.sin(t * 8)
+          };
+        case 'feliz':
+          return {
+            apertureBias: 0.12,
+            tiltBias: -0.1,
+            leftApertureBias: 0,
+            rightApertureBias: 0,
+            saccAmp: 1,
+            saccRateMul: 1,
+            blinkRateMul: 0.95,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: 36,
+            satBoost: 10,
+            lightBoost: 3,
+            glowPulse: 1.02
+          };
+        case 'calma':
+          return {
+            apertureBias: 0.06,
+            tiltBias: -0.06,
+            leftApertureBias: 0,
+            rightApertureBias: 0,
+            saccAmp: 0.45,
+            saccRateMul: 0.5,
+            blinkRateMul: 0.7,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: 18,
+            satBoost: -4,
+            lightBoost: 1,
+            glowPulse: 0.92
+          };
+        case 'dormido':
+          return {
+            apertureBias: -0.72,
+            tiltBias: -0.04,
+            leftApertureBias: -0.06,
+            rightApertureBias: -0.06,
+            saccAmp: 0.15,
+            saccRateMul: 0.3,
+            blinkRateMul: 0.4,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: 10,
+            satBoost: -10,
+            lightBoost: -2,
+            glowPulse: 0.78
+          };
+        case 'pensando':
+          return {
+            apertureBias: -0.15,
+            tiltBias: 0.06,
+            leftApertureBias: 0.16,
+            rightApertureBias: -0.16,
+            saccAmp: 0.85,
+            saccRateMul: 0.9,
+            blinkRateMul: 0.95,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: -4,
+            satBoost: 8,
+            lightBoost: 0,
+            glowPulse: 0.86 + 0.2 * Math.sin(t * 6)
+          };
+        case 'confuso':
+          return {
+            apertureBias: -0.1,
+            tiltBias: 0,
+            leftApertureBias: -0.22,
+            rightApertureBias: 0.22,
+            saccAmp: 1.05,
+            saccRateMul: 1.1,
+            blinkRateMul: 1,
+            jitterX: 0.3 * Math.sin(t * 6),
+            jitterY: 0,
+            hueShift: 0,
+            satBoost: 4,
+            lightBoost: -1,
+            glowPulse: 1
+          };
+        default:
+          return {
+            apertureBias: 0,
+            tiltBias: 0,
+            leftApertureBias: 0,
+            rightApertureBias: 0,
+            saccAmp: 1,
+            saccRateMul: 1,
+            blinkRateMul: 1,
+            jitterX: 0,
+            jitterY: 0,
+            hueShift: 0,
+            satBoost: 0,
+            lightBoost: 0,
+            glowPulse: 1
+          };
+      }
+    }
+
+    // ═══════════════════════════════════════════
+    //  MAIN LOOP
+    // ═══════════════════════════════════════════
+
+    function tick(ts) {
+      const dt = ts - lastT;
+      lastT = ts;
+      totalT += dt;
+
+      // ── Smooth transitions ──
+      const spd = 0.045;
+      smoothVed.v += (ved.v - smoothVed.v) * spd;
+      smoothVed.e += (ved.e - smoothVed.e) * spd;
+      smoothVed.d += (ved.d - smoothVed.d) * spd;
+
+      // ── Cycle ──
+      if (opts.cycle) {
+        const dur = parseFloat(document.getElementById('cycle-speed').value) * 1000;
+        cycleTime += dt;
+        const t = Math.min(cycleTime / dur, 1);
+        const et = easeInOut(t);
+        ved.v = lerp(cycleFrom.v, cycleTo.v, et);
+        ved.e = lerp(cycleFrom.e, cycleTo.e, et);
+        ved.d = lerp(cycleFrom.d, cycleTo.d, et);
+        updateSliders();
+        if (t >= 1) {
+          cycleTime = 0;
+          cycleIdx = (cycleIdx + 1) % cyclePresets.length;
+          cycleFrom = { ...cycleTo };
+          cycleTo = { ...cyclePresets[(cycleIdx + 1) % cyclePresets.length] };
+          document.getElementById('emotion-label').textContent = cycleTo.name;
+        }
+      }
+
+      const { v, e, d } = smoothVed;
+      const der = getDerived(v, e, d);
+      const emotion = detectEmotion(v, e, d);
+      const tune = getEmotionTuning(emotion, totalT);
+
+      // ── Blink ──
+      let blinkAmt = 0;
+      if (opts.blink) {
+        blinkTimer += dt;
+        if (blinkPhase > 0) {
+          blinkPhase -= dt;
+          const half = blinkDuration / 2;
+          const elapsed = blinkDuration - blinkPhase;
+          blinkAmt = elapsed < half ? elapsed / half : 1 - (elapsed - half) / half;
+          blinkAmt = clamp(blinkAmt, 0, 1);
+          if (blinkPhase <= 0) blinkPhase = 0;
+        } else if (blinkTimer >= blinkNextAt) {
+          blinkTimer = 0;
+          blinkPhase = blinkDuration;
+          blinkNextAt = rnd(1800 - e * 800, 5000 - e * 2000) / tune.blinkRateMul;
+        }
+      }
+
+      // ── Saccade ──
+      if (opts.saccade) {
+        saccTimer += dt;
+        sacc.x += (saccTarget.x - sacc.x) * 0.07;
+        sacc.y += (saccTarget.y - sacc.y) * 0.07;
+        if (saccTimer >= saccNextAt) {
+          saccTimer = 0;
+          saccNextAt = rnd(400, 900) / tune.saccRateMul;
+          saccTarget.x = rnd(-3, 3) * tune.saccAmp;
+          saccTarget.y = rnd(-2, 2) * tune.saccAmp;
+        }
+      } else {
+        sacc.x *= 0.92; sacc.y *= 0.92;
+      }
+
+      // ── Breathing ──
+      let breathMod = 1;
+      if (opts.breath) {
+        const speed = 0.6 + 1.8 * e;
+        breathMod = 0.88 + 0.12 * Math.sin(totalT * 0.001 * speed);
+      }
+
+      // ── Thinking ──
+      let thinkMod = 1;
+      if (opts.thinking) {
+        thinkMod = 0.75 + 0.25 * Math.sin(totalT * 0.005);
+      }
+
+      // ════════════════════
+      //  APPLY TO SVG
+      // ════════════════════
+
+      // 1) Update clip paths (eyelid shapes)
+      const tunedAperture = clamp(der.aperture + tune.apertureBias, 0.01, 1);
+      const tunedTilt = clamp(der.tilt + tune.tiltBias, -1, 1);
+      const lAperture = clamp(tunedAperture + tune.leftApertureBias, 0.01, 1);
+      const rAperture = clamp(tunedAperture + tune.rightApertureBias, 0.01, 1);
+      $clipL.setAttribute('d', buildEyeClipPath(LEX, LEY, EYE_R, lAperture, tunedTilt, -1, blinkAmt));
+      $clipR.setAttribute('d', buildEyeClipPath(REX, REY, EYE_R, rAperture, tunedTilt, +1, blinkAmt));
+
+      // 2) Micro-saccade: shift eye circles slightly
+      const jitterX = tune.jitterX;
+      const jitterY = tune.jitterY;
+      document.getElementById('leftSocket').setAttribute('cx', LEX + sacc.x + jitterX);
+      document.getElementById('leftSocket').setAttribute('cy', LEY + sacc.y + jitterY);
+      document.getElementById('leftEye').setAttribute('cx', LEX + sacc.x + jitterX);
+      document.getElementById('leftEye').setAttribute('cy', LEY + sacc.y + jitterY);
+
+      document.getElementById('rightSocket').setAttribute('cx', REX + sacc.x + jitterX);
+      document.getElementById('rightSocket').setAttribute('cy', REY + sacc.y + jitterY);
+      document.getElementById('rightEye').setAttribute('cx', REX + sacc.x + jitterX);
+      document.getElementById('rightEye').setAttribute('cy', REY + sacc.y + jitterY);
+
+      // 3) Colors
+      const intensityMod = 0.75 + (externalIntensity * 0.5);
+      applyGlowColor(der, breathMod * intensityMod, thinkMod, tune);
+
+      // 4) Derived info
+      updateDerivedInfo(der);
+
+      requestAnimationFrame(tick);
+    }
+
+    // ═══════════════════════════════════════════
+    //  UI
+    // ═══════════════════════════════════════════
+
+    function setupControls() {
+      const vS = document.getElementById('valence');
+      const eS = document.getElementById('energy');
+      const dS = document.getElementById('dominance');
+
+      vS.addEventListener('input', () => { ved.v = vS.value / 100; document.getElementById('v-val').textContent = ved.v.toFixed(2); updateEmotionLabel(); });
+      eS.addEventListener('input', () => { ved.e = eS.value / 100; document.getElementById('e-val').textContent = ved.e.toFixed(2); updateEmotionLabel(); });
+      dS.addEventListener('input', () => { ved.d = dS.value / 100; document.getElementById('d-val').textContent = ved.d.toFixed(2); updateEmotionLabel(); });
+
+      document.getElementById('cycle-speed').addEventListener('input', function () {
+        document.getElementById('cycle-speed-val').textContent = this.value + 's';
+      });
+    }
+
+    const emotionPresets = {
+      neutral: [0, 0.3, 0.5],
+      feliz: [0.85, 0.5, 0.4],
+      enojado: [-0.8, 0.9, 0.9],
+      triste: [-0.72, 0.12, 0.18],
+      sorpresa: [0.3, 0.95, 0.2],
+      miedo: [-0.38, 0.82, 0.2],
+      calma: [0.5, 0.1, 0.6],
+      pensando: [0, 0.95, 1.0],
+      dormido: [0.6, 0.15, 0.5],
+      confuso: [-0.2, 0.5, 0.3]
+    };
+
+    function setPreset(v, e, d, name, evt = null) {
+      ved.v = v; ved.e = e; ved.d = d;
+      updateSliders();
+      document.getElementById('emotion-label').textContent = name;
+      document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+      if (evt && evt.target) {
+        evt.target.classList.add('active');
+      }
+    }
+
+    function applyEmotion(name) {
+      const key = (name || 'calma').toLowerCase();
+      const preset = emotionPresets[key] || emotionPresets.calma;
+      setPreset(preset[0], preset[1], preset[2], key);
+    }
+
+    function applyFaceOptions(faceOptions) {
+      if (!faceOptions || typeof faceOptions !== 'object') {
+        return;
+      }
+
+      const optionKeys = ['blink', 'breath', 'saccade', 'thinking', 'cycle'];
+
+      for (const key of optionKeys) {
+        if (typeof faceOptions[key] !== 'boolean') {
+          continue;
+        }
+
+        opts[key] = faceOptions[key];
+
+        const toggleElement = document.getElementById(`toggle-${key}`);
+        if (toggleElement) {
+          toggleElement.classList.toggle('on', faceOptions[key]);
+        }
+      }
+
+      if (typeof faceOptions.intensity === 'number' && Number.isFinite(faceOptions.intensity)) {
+        externalIntensity = clamp(faceOptions.intensity, 0, 1);
+      }
+    }
+
+    window.addEventListener('message', (messageEvent) => {
+      if (!messageEvent || !messageEvent.data) {
+        return;
+      }
+
+      if (messageEvent.data.type === 'orion-face-emotion') {
+        applyEmotion(messageEvent.data.emotion);
+      }
+
+      if (messageEvent.data.type === 'orion-face-opts') {
+        applyFaceOptions(messageEvent.data.opts);
+      }
+    });
+
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get('embed') === '1') {
+      document.body.classList.add('embed');
+    }
+
+    function updateSliders() {
+      document.getElementById('valence').value = Math.round(ved.v * 100);
+      document.getElementById('energy').value = Math.round(ved.e * 100);
+      document.getElementById('dominance').value = Math.round(ved.d * 100);
+      document.getElementById('v-val').textContent = ved.v.toFixed(2);
+      document.getElementById('e-val').textContent = ved.e.toFixed(2);
+      document.getElementById('d-val').textContent = ved.d.toFixed(2);
+    }
+
+    function toggleOpt(key, el) {
+      opts[key] = !opts[key];
+      el.classList.toggle('on');
+      if (key === 'thinking' && opts.thinking) {
+        ved.e = 0.95; ved.d = 1.0; ved.v = 0; updateSliders();
+      }
+      if (key === 'cycle') {
+        cycleTime = 0; cycleIdx = 0;
+        cycleFrom = { v: ved.v, e: ved.e, d: ved.d };
+        cycleTo = { ...cyclePresets[1] };
+      }
+    }
+
+    function updateEmotionLabel() {
+      const { v, e, d } = ved;
+      document.getElementById('emotion-label').textContent = detectEmotion(v, e, d);
+    }
+
+    function updateDerivedInfo(der) {
+      document.getElementById('derived').innerHTML =
+        `aperture: <span class="val">${der.aperture.toFixed(3)}</span><br>` +
+        `tilt: <span class="val">${der.tilt.toFixed(3)}</span><br>` +
+        `squash: <span class="val">${der.squash.toFixed(3)}</span><br>` +
+        `hue: <span class="val">${der.hue.toFixed(1)}°</span><br>` +
+        `glow: <span class="val">hsl(${der.hue.toFixed(0)}, ${der.sat.toFixed(0)}%, ${der.light.toFixed(0)}%)</span>`;
+    }
+
+    // ═══════════════════════════════════════════
+    //  UTILS
+    // ═══════════════════════════════════════════
+
+    function mapRange(val, a, b, c, d) { return c + (val - a) / (b - a) * (d - c); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+    function rnd(a, b) { return a + Math.random() * (b - a); }
+
+    // ═══════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════
+    setupControls();
+    applyEmotion('calma');
+    requestAnimationFrame(tick);
+
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# Secretos - NUNCA subir a git
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+
+# Memory / datos persistentes
+memory/
+
+# Editor
+.vscode/
+.idea/

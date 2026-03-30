@@ -1,0 +1,63 @@
+{
+  "telegram": {
+    "enabled": false,
+    "token": "SHOWCASE_TOKEN_PLACEHOLDER",
+    "allowed_users": []
+  },
+  "ollama": {
+    "enabled": false,
+    "base_url": "http://localhost:00000",
+    "model": "showcase-general",
+    "model_code": "showcase-code",
+    "model_vision": "showcase-vision",
+    "model_reasoning": "showcase-reasoning",
+    "model_agent": "showcase-agent",
+    "model_fast": "showcase-fast"
+  },
+  "orion": {
+    "name": "Orion Showcase",
+    "personality": "portfolio_demo",
+    "language": "es-MX",
+    "mode": "showcase",
+    "showcase_notice": "Implementation removed for confidentiality",
+    "memory_limit_days": 7,
+    "max_message_length": 2000
+  },
+  "email": {
+    "enabled": false,
+    "address": "showcase@example.com",
+    "password": "SHOWCASE_PASSWORD_PLACEHOLDER",
+    "imap_host": "imap.showcase.local",
+    "imap_port": 993,
+    "smtp_host": "smtp.showcase.local",
+    "smtp_port": 587,
+    "check_interval": 300,
+    "auto_respond": false,
+    "endex_knowledge_path": "./knowledge/endex/Endex.md"
+  },
+  "discord": {
+    "enabled": false,
+    "token": "SHOWCASE_TOKEN_PLACEHOLDER",
+    "channel_id": "SHOWCASE_CHANNEL_ID",
+    "notifications": {
+      "new_email": false,
+      "auto_response": false,
+      "sent_email": false,
+      "errors": true
+    }
+  },
+  "tools": {
+    "enabled": [
+      "mock_pipeline"
+    ],
+    "maps_scraper": {
+      "script_path": "./tools/maps/scraper.py",
+      "python_path": "python3"
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/orion.log",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  }
+}
